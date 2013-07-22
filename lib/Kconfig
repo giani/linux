@@ -213,6 +213,14 @@ config DECOMPRESS_LZO
 	select LZO_DECOMPRESS
 	tristate
 
+config SZIP
+	select ZLIB_INFLATE
+	tristate
+	help
+	  Use this to provide szip decompression support. szip is a seekable
+	  zlib format. Check https://github.com/glandium/faulty.lib for the
+	  szip tool. This is required for transparent ext4 decompression.
+
 #
 # Generic allocator support is selected if needed
 #
