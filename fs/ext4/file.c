@@ -31,6 +31,9 @@
 #include "xattr.h"
 #include "acl.h"
 
+#include <linux/zlib.h>
+#include <linux/szip.h>
+
 /*
  * Called when an inode is released. Note that this is different
  * from ext4_file_open: open gets called at every open, but release
@@ -623,6 +626,68 @@ loff_t ext4_llseek(struct file *file, loff_t offset, int whence)
 	return -EINVAL;
 }
 
+static int ext4_is_file_compressed(struct file *file)
+{
+	struct inode *inode = file->f_mapping->host;
+	return ext4_test_inode_flag(inode, EXT4_INODE_COMPR);
+}
+
+static int _ext4_decompress(char __user *buf, int sz)
+{
+	/*
+	 * We can really cheat here since we have the full buffer already read
+	 * and made available
+	 */
+	struct szip_struct szip;
+	char *temp;
+	size_t uncom_size;
+
+	int ret = szip_init(&szip, buf);
+	if (ret) {
+		ret = -1;
+		goto out;
+	}
+
+	uncom_size = szip_uncompressed_size(&szip);
+	temp = kmalloc(uncom_size, GFP_NOFS);
+	if (!temp) {
+		ret = -2;
+		goto out;
+	}
+
+	ret = szip_decompress(&szip, temp, 0);
+	if (ret) {
+		ret = -3;
+		goto out_free;
+	}
+
+	sz = min_t(int, sz, uncom_size);
+
+	memset(buf, 0, sz);
+	memcpy(buf, temp, sz);
+out_free:
+	kfree(temp);
+
+out:
+	return ret;
+
+}
+
+int ext4_decompress(struct file *file, char __user *buf, size_t len)
+{
+	int ret = 0;
+
+	if (!ext4_is_file_compressed(file))
+		return 0;
+
+	ret = _ext4_decompress(buf, len);
+	if (ret) {
+		goto out;
+	}
+out:
+	return ret;
+}
+
 const struct file_operations ext4_file_operations = {
 	.llseek		= ext4_llseek,
 	.read		= do_sync_read,
@@ -640,6 +705,7 @@ const struct file_operations ext4_file_operations = {
 	.splice_read	= generic_file_splice_read,
 	.splice_write	= generic_file_splice_write,
 	.fallocate	= ext4_fallocate,
+	.decompress	= ext4_decompress,
 };
 
 const struct inode_operations ext4_file_inode_operations = {

@@ -1543,6 +1543,7 @@ struct file_operations {
 	long (*fallocate)(struct file *file, int mode, loff_t offset,
 			  loff_t len);
 	int (*show_fdinfo)(struct seq_file *m, struct file *f);
+	int (*decompress)(struct file *, char *, size_t);
 };
 
 struct inode_operations {
