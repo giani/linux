@@ -56,7 +56,10 @@ static int vruntime_calculator(void *data)
 
 	u64 calculated_vruntime;
 
-	cpu = smp_processor_id();
+	trace_printk("Entered vruntime_calculator\n");
+
+	/*cpu = smp_processor_id();*/
+	cpu = 0; /*UP only*/
 	rq = cpu_rq(cpu);
 
 	cfs = &rq->cfs;
@@ -78,6 +81,13 @@ static int vruntime_calculator(void *data)
 		cfs_running_avg_vruntime += se->vruntime;
 		nr_tasks++;
 	}
+
+	trace_printk("nr_tasks is %llu\n", nr_tasks);
+
+	if (!nr_tasks) {
+		trace_printk("No EEVDF tasks on CPU0, exit\n");
+		return -1;
+	}
 	
 	calculated_vruntime = cfs_running_avg_vruntime / nr_tasks;
 
@@ -93,6 +103,7 @@ static int vruntime_calculator(void *data)
 static int __init eevdf_avg_vruntime_init(void)
 {
 	trace_printk("Hello World\n");
+	kthread_run(&vruntime_calculator, NULL, "eevdf-tester-%d", smp_processor_id());
 	return 0;
 }
 
