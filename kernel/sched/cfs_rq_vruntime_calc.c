@@ -24,13 +24,13 @@
 
 #include "sched.h"
 
-u64 cfs_avg_vruntime;
+u64 cfs_min_vruntime;
 u64 nr_tasks;
 u64 cfs_running_avg_vruntime;
 
-static inline void read_avg_vruntime(struct cfs_rq *cfs)
+static inline void read_min_vruntime(struct cfs_rq *cfs)
 {
-	cfs_avg_vruntime = cfs->avg_vruntime;
+	cfs_min_vruntime = cfs->min_vruntime;
 }
 
 #define __node_2_se(node) \
@@ -64,7 +64,7 @@ static int vruntime_calculator(void *data)
 
 	cfs = &rq->cfs;
 
-	read_avg_vruntime(cfs);
+	read_min_vruntime(cfs);
 
 	/*
 	 * Walk through the rb tree -> look at the se->vruntime value and add it
@@ -91,9 +91,9 @@ static int vruntime_calculator(void *data)
 	
 	calculated_vruntime = cfs_running_avg_vruntime / nr_tasks;
 
-	if (calculated_vruntime != cfs_avg_vruntime)
-		trace_printk("MISMATCH\n avg_vruntime is %llu, calculated avg_vruntime is %llu\n",
-			cfs_avg_vruntime, calculated_vruntime);
+	if (calculated_vruntime != cfs_min_vruntime)
+		trace_printk("MISMATCH\n min_vruntime is %llu, calculated avg_vruntime is %llu, difference is %llu\n",
+			cfs_min_vruntime, calculated_vruntime, calculated_vruntime - cfs_min_vruntime);
 	else
 		trace_printk("PASS: vruntime matches calculated average\n");
 
@@ -102,8 +102,17 @@ static int vruntime_calculator(void *data)
 
 static int __init eevdf_avg_vruntime_init(void)
 {
+	struct task_struct *kt;
 	trace_printk("Hello World\n");
-	kthread_run(&vruntime_calculator, NULL, "eevdf-tester-%d", smp_processor_id());
+
+	kt = kthread_create(&vruntime_calculator, NULL, "eevdf-tester-%d", smp_processor_id());
+
+	if(!kt) {
+		trace_printk("Failed to launch kthread\n");
+		return -1;
+	}
+	kt->normal_prio = 99;
+	wake_up_process(kt);
 	return 0;
 }
 
