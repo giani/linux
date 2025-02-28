@@ -24,14 +24,6 @@
 
 #include "sched.h"
 
-u64 cfs_min_vruntime;
-u64 nr_tasks;
-u64 cfs_running_avg_vruntime;
-
-static inline void read_min_vruntime(struct cfs_rq *cfs)
-{
-	cfs_min_vruntime = cfs->min_vruntime;
-}
 
 #define __node_2_se(node) \
         rb_entry((node), struct sched_entity, run_node)
@@ -50,13 +42,15 @@ static int vruntime_calculator(void *data)
 	int cpu;
 	struct cfs_rq *cfs;
 	struct sched_entity *se;
-	u64 cfs_avg_vruntime;
 
 	struct rb_node *node;
 	struct rb_root *root;
 
+	u64 cfs_avg_vruntime;
+	u64 nr_tasks;
+	u64 cfs_running_avg_vruntime;
 	u64 calculated_vruntime;
-	s64 avg_difference, min_difference;
+	s64 avg_difference;
 
 	trace_printk("Entered vruntime_calculator\n");
 	local_irq_disable();
@@ -68,8 +62,6 @@ static int vruntime_calculator(void *data)
 	cfs = &rq->cfs;
 
 	cfs_avg_vruntime = avg_vruntime(cfs);
-
-	read_min_vruntime(cfs);
 
 	/*
 	 * Walk through the rb tree -> look at the se->vruntime value and add it
@@ -102,12 +94,11 @@ static int vruntime_calculator(void *data)
 	
 	calculated_vruntime = cfs_running_avg_vruntime / nr_tasks;
 	avg_difference = (s64)calculated_vruntime - (s64)cfs_avg_vruntime; /*Unneccessary paranoia)*/
-	min_difference = calculated_vruntime - cfs_min_vruntime;
 
-	trace_printk("Difference between calculated average vruntime and tracked vruntime is %lld\n", avg_difference);
-	trace_printk("Difference between calculated average vruntime and min vruntime is %lld\n", min_difference);
-	
-
+	if (avg_difference)
+		trace_printk("FAIL - error introduced. Lemma 2 has been violated\n");
+	else
+		trace_printk("PASS - calculated vruntime difference is the same as tracked. Total lag in the system is 0\n");
 
 	return 0;
 }
