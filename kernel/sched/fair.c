@@ -675,6 +675,7 @@ u64 avg_vruntime(struct cfs_rq *cfs_rq)
 
 	return cfs_rq->min_vruntime + avg;
 }
+EXPORT_SYMBOL_GPL(avg_vruntime);
 
 /*
  * lag_i = S - s_i = w_i * (V - v_i)
