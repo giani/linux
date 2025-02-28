@@ -79,6 +79,14 @@ static int vruntime_calculator(void *data)
 		nr_tasks++;
 	}
 
+	/*
+	 * Counterintuitively, it is not necessary that all the tasks that are
+	 * runnable are on the rbtree. If (as is the case here), an RT task
+	 * preempts a FAIR task, it will remain as cfs->curr as opposed to being
+	 * queued back on the CFS runqueue. So, we do need to take into account
+	 * what that task is doing. Check if that task exists, and if so, account
+	 * for its vruntime
+	 */
 	if (cfs->curr) {
 		cfs_running_avg_vruntime += cfs->curr->vruntime;
 		nr_tasks++;
