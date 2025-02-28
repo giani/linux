@@ -50,19 +50,24 @@ static int vruntime_calculator(void *data)
 	int cpu;
 	struct cfs_rq *cfs;
 	struct sched_entity *se;
+	u64 cfs_avg_vruntime;
 
 	struct rb_node *node;
 	struct rb_root *root;
 
 	u64 calculated_vruntime;
+	s64 avg_difference, min_difference;
 
 	trace_printk("Entered vruntime_calculator\n");
+	local_irq_disable();
 
 	/*cpu = smp_processor_id();*/
 	cpu = 0; /*UP only*/
 	rq = cpu_rq(cpu);
 
 	cfs = &rq->cfs;
+
+	cfs_avg_vruntime = avg_vruntime(cfs);
 
 	read_min_vruntime(cfs);
 
@@ -82,6 +87,12 @@ static int vruntime_calculator(void *data)
 		nr_tasks++;
 	}
 
+	if (cfs->curr) {
+		cfs_running_avg_vruntime += cfs->curr->vruntime;
+		nr_tasks++;
+	}
+	local_irq_enable();
+
 	trace_printk("nr_tasks is %llu\n", nr_tasks);
 
 	if (!nr_tasks) {
@@ -90,12 +101,13 @@ static int vruntime_calculator(void *data)
 	}
 	
 	calculated_vruntime = cfs_running_avg_vruntime / nr_tasks;
+	avg_difference = (s64)calculated_vruntime - (s64)cfs_avg_vruntime; /*Unneccessary paranoia)*/
+	min_difference = calculated_vruntime - cfs_min_vruntime;
 
-	if (calculated_vruntime != cfs_min_vruntime)
-		trace_printk("MISMATCH\n min_vruntime is %llu, calculated avg_vruntime is %llu, difference is %llu\n",
-			cfs_min_vruntime, calculated_vruntime, calculated_vruntime - cfs_min_vruntime);
-	else
-		trace_printk("PASS: vruntime matches calculated average\n");
+	trace_printk("Difference between calculated average vruntime and tracked vruntime is %lld\n", avg_difference);
+	trace_printk("Difference between calculated average vruntime and min vruntime is %lld\n", min_difference);
+	
+
 
 	return 0;
 }
