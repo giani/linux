@@ -884,6 +884,7 @@ struct sched_entity *__pick_first_entity(struct cfs_rq *cfs_rq)
 	return __node_2_se(left);
 }
 
+extern bool eevdf_positive_lag_test;
 /*
  * Earliest Eligible Virtual Deadline First
  *
@@ -964,6 +965,26 @@ static struct sched_entity *pick_eevdf(struct cfs_rq *cfs_rq)
 found:
 	if (!best || (curr && entity_before(curr, best)))
 		best = curr;
+
+	/*
+	 * This should really be protected by a lock, but for now we
+	 * are OK with racy updates.
+	 */
+	if (eevdf_positive_lag_test) {
+		static int eevdf_positive_lag_test_counter;
+		u64 eevdf_average_vruntime = avg_vruntime(cfs_rq);
+		eevdf_positive_lag_test_counter++;
+		if (best->vruntime > eevdf_average_vruntime) {
+			trace_printk("FAIL: Lemma 1 failed - selected task has negative lag\n");
+			eevdf_positive_lag_test = 0;
+			eevdf_positive_lag_test_counter = 0;
+		}
+		if (eevdf_positive_lag_test_counter > 10) {
+			eevdf_positive_lag_test = 0;
+			eevdf_positive_lag_test_counter = 0;
+			trace_printk("PASS: At least 10 selected tasks had positive lag\n");
+		}
+	}
 
 	return best;
 }

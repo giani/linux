@@ -18,12 +18,13 @@
  * This is designed for an uniprocessor system
  */
 
+#include <linux/debugfs.h>
 #include <linux/init.h>
-#include <linux/module.h>
 #include <linux/sched.h>
 
 #include "sched.h"
 
+#ifdef CONFIG_SCHED_EEVDF_TESTING
 
 #define __node_2_se(node) \
         rb_entry((node), struct sched_entity, run_node)
@@ -128,9 +129,18 @@ static void __exit eevdf_avg_vruntime_exit(void)
 {
 }
 
-MODULE_AUTHOR("Dhaval Giani");
-MODULE_DESCRIPTION("EEVDF average vruntime test");
-MODULE_LICENSE("GPL");
+bool eevdf_positive_lag_test = 0;
 
-module_init(eevdf_avg_vruntime_init);
-module_exit(eevdf_avg_vruntime_exit);
+static struct dentry *debugfs_eevdf_testing;
+void init_eevdf_testing_debugfs(struct dentry *debugfs_sched)
+{
+	debugfs_eevdf_testing = debugfs_create_dir("eevdf-testing", debugfs_sched);
+
+	debugfs_create_bool("eevdf_positive_lag_test", 0700,
+				debugfs_eevdf_testing, &eevdf_positive_lag_test);
+
+}
+
+#else /* CONFIG_SCHED_EEVDF_TESTING */
+
+#endif /* CONFIG_SCHED_EEVDF_TESTING */

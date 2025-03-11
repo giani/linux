@@ -533,6 +533,7 @@ static __init int sched_init_debug(void)
 	debugfs_create_file("debug", 0444, debugfs_sched, NULL, &sched_debug_fops);
 
 	debugfs_fair_server_init();
+	init_eevdf_testing_debugfs(debugfs_sched);
 
 	return 0;
 }

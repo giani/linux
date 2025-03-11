@@ -176,3 +176,7 @@ config SCHED_CLASS_EXT
 	  For more information:
 	    Documentation/scheduler/sched-ext.rst
 	    https://github.com/sched-ext/scx
+
+config SCHED_EEVDF_TESTING
+	bool "EEVDF testing"
+

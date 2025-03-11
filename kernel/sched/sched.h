@@ -3985,4 +3985,10 @@ void sched_enq_and_set_task(struct sched_enq_and_set_ctx *ctx);
 
 #include "ext.h"
 
+#ifdef CONFIG_SCHED_EEVDF_TESTING
+void init_eevdf_testing_debugfs(struct dentry *debugfs_sched);
+#else /* CONFIG_SCHED_EEVDF_TESTING */
+static inline void init_eevdf_testing_debugfs(struct dentry *debugfs_sched) {}
+#endif /* CONFIG_SCHED_EEVDF_TESTING */
+
 #endif /* _KERNEL_SCHED_SCHED_H */
