@@ -29,7 +29,7 @@
         rb_entry((node), struct sched_entity, run_node)
 
 /*
- * This is the main thread function - Run at RT 99 priority.
+ * This is the main thread function - Run at RT priority.
  * Since this is a UP system, there is no possibility of any
  * migrations. The goal is to get from rq to cfs_rq and then
  * to walk through the rb_tree and keeping track of the number
@@ -52,7 +52,6 @@ static int vruntime_calculator(void *data)
 	u64 calculated_vruntime;
 	s64 avg_difference;
 
-	trace_printk("Entered vruntime_calculator\n");
 	local_irq_disable();
 
 	/*cpu = smp_processor_id();*/
@@ -80,16 +79,13 @@ static int vruntime_calculator(void *data)
 	}
 
 	/*
-	 * Counterintuitively, it is not necessary that all the tasks that are
-	 * runnable are on the rbtree. If (as is the case here), an RT task
-	 * preempts a FAIR task, it will remain as cfs->curr as opposed to being
-	 * queued back on the CFS runqueue. So, we do need to take into account
-	 * what that task is doing. Check if that task exists, and if so, account
-	 * for its vruntime
+	 * Just adding for the sake of completeness, we should never enter
+	 * this loop.
 	 */
 	if (cfs->curr) {
 		cfs_running_avg_vruntime += cfs->curr->vruntime;
 		nr_tasks++;
+		trace_printk("ARGH!\n");
 	}
 	local_irq_enable();
 
@@ -114,7 +110,6 @@ static int vruntime_calculator(void *data)
 static int __init eevdf_avg_vruntime_init(void)
 {
 	struct task_struct *kt;
-	trace_printk("Hello World\n");
 
 	kt = kthread_create(&vruntime_calculator, NULL, "eevdf-tester-%d", smp_processor_id());
 
@@ -122,14 +117,15 @@ static int __init eevdf_avg_vruntime_init(void)
 		trace_printk("Failed to launch kthread\n");
 		return -1;
 	}
-	kt->normal_prio = 99;
+
+	/* Set to RT priority */
+	sched_set_fifo_low(kt);
 	wake_up_process(kt);
 	return 0;
 }
 
 static void __exit eevdf_avg_vruntime_exit(void)
 {
-	trace_printk("Goodbye World\n");
 }
 
 MODULE_AUTHOR("Dhaval Giani");
