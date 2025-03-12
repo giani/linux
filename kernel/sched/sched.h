@@ -44,6 +44,7 @@
 #include <linux/lockdep.h>
 #include <linux/minmax.h>
 #include <linux/mm.h>
+#include <linux/mmu_context.h>
 #include <linux/module.h>
 #include <linux/mutex_api.h>
 #include <linux/plist.h>
@@ -3984,5 +3985,11 @@ DEFINE_CLASS(sched_change, struct sched_change_ctx *,
 DEFINE_CLASS_IS_UNCONDITIONAL(sched_change)
 
 #include "ext.h"
+
+#ifdef CONFIG_SCHED_EEVDF_TESTING
+void debugfs_eevdf_testing_init(struct dentry *debugfs_sched);
+#else /* CONFIG_SCHED_EEVDF_TESTING */
+static inline void init_eevdf_testing_debugfs(struct dentry *debugfs_sched) {}
+#endif /* CONFIG_SCHED_EEVDF_TESTING */
 
 #endif /* _KERNEL_SCHED_SCHED_H */
