@@ -30,6 +30,8 @@ void debugfs_eevdf_testing_init(struct dentry *debugfs_sched)
 
 }
 
+static int test_total_zero_lag(void *);
+static void launch_test_zero_lag(void);
 void test_eevdf_positive_lag(struct cfs_rq *cfs, struct sched_entity *se)
 {
 	static int eevdf_positive_lag_test_counter;
@@ -55,6 +57,7 @@ void test_eevdf_positive_lag(struct cfs_rq *cfs, struct sched_entity *se)
 		eevdf_positive_lag_test = 0;
 		eevdf_positive_lag_test_counter = 0;
 		trace_printk("PASS: At least 100 selected tasks had positive lag\n");
+		launch_test_zero_lag();
 	}
 }
 
@@ -122,7 +125,7 @@ static bool test_eevdf_zero_lag(struct cfs_rq *cfs)
 }
 
 /* The average vruntime of the entire cfs_rq should be equal to the avg_vruntime(cfs_rq) */
-void test_total_zero_lag(void)
+static int test_total_zero_lag(void *data)
 {
 	int cpu;
 	struct rq *rq;
@@ -144,9 +147,22 @@ void test_total_zero_lag(void)
 	}
 	if (!success) {
 		trace_printk("FAILED: tracked average vruntime doesn't match calculated average vruntime\n");
-		return;
+		return -1;
 	}
 	trace_printk("PASS: Tracked average runtime matches calculated average vruntime\n");
+	return 0;
+}
+
+static void launch_test_zero_lag(void)
+{
+	struct task_struct *kt;
+
+	kt = kthread_create(&test_total_zero_lag, NULL, "eevdf-tester-%d", smp_processor_id());
+	if(!kt) {
+		trace_printk("Failed to launch kthread\n");
+	}
+
+	wake_up_process(kt);
 }
 
 #endif /* CONFIG_SCHED_EEVDF_TESTING */
