@@ -95,6 +95,9 @@ void test_eevdf_positive_lag(struct cfs_rq *cfs, struct sched_entity *se)
 	}
 }
 
+
+u64 calc_delta_fair(u64 delta, struct sched_entity *se);
+
 /*
  * we do, what we need to do
  */
@@ -108,6 +111,9 @@ static bool test_eevdf_cfs_rq_zero_lag(struct cfs_rq *cfs, struct list_head *tg_
 
 	u64 total_vruntime = 0;
 	u64 nr_tasks = 0;
+
+	s64 max_lag = INT64_MIN;
+	s64 min_lag = INT64_MAX;
 
 	struct sched_entity *se;
 	struct rb_node *node;
@@ -125,6 +131,7 @@ static bool test_eevdf_cfs_rq_zero_lag(struct cfs_rq *cfs, struct list_head *tg_
 	root = &cfs->tasks_timeline.rb_root;
 
 	for (node = rb_first(root); node; node = rb_next(node)) {
+		s64 vlag, limit;
 		se = __node_2_se(node);
 		WARN_ON_ONCE(__builtin_add_overflow(total_vruntime,
 					se->vruntime, &total_vruntime));
@@ -134,6 +141,10 @@ static bool test_eevdf_cfs_rq_zero_lag(struct cfs_rq *cfs, struct list_head *tg_
 		if (!entity_is_task(se))
 			list_add_tail(&se->tg_entry, tg_se);
 		nr_tasks++;
+		vlag = cfs_avg_vruntime - se->vruntime;
+		limit = calc_delta_fair(max_t(u64, 2*se->slice, TICK_NSEC), se);
+		if ((vlag > 0 && vlag > limit) || (vlag < 0 && vlag < -limit)) 
+			trace_printk("FAIL: lag is exceeding limits\n");
 	}
 
 	if (cfs->curr) {
