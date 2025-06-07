@@ -104,60 +104,72 @@ u64 calc_delta_fair(u64 delta, struct sched_entity *se);
 #define __node_2_se(node) \
 	rb_entry((node), struct sched_entity, run_node)
 
+static bool check_theorem1(struct sched_entity *se, u64 avg_vruntime)
+{
+	s64 vlag, limit;
+
+	vlag = avg_vruntime - se->vruntime;
+	limit = calc_delta_fair(max_t(u64, 2*se->slice, TICK_NSEC), se);
+
+	if ((vlag > 0 && vlag > limit) || (vlag < 0 && vlag < -limit)) {
+		trace_printk("FAIL: Theorem 1 violation - Task %d (%s) lag %lld "
+			    "exceeds limit %lld\n",
+			    entity_is_task(se) ? task_pid_nr(task_of(se)) : 0,
+			    entity_is_task(se) ? task_of(se)->comm : "task_group",
+			    vlag, limit);
+		trace_printk("  vruntime: %llu, avg_vruntime: %llu, slice: %llu\n",
+			    se->vruntime, avg_vruntime, se->slice);
+		return false;
+	}
+	return true;
+}
+
 static bool test_eevdf_cfs_rq_zero_lag(struct cfs_rq *cfs, struct list_head *tg_se)
 {
-	u64 cfs_avg_vruntime;
-	u64 calculated_avg_vruntime;
-
+	u64 cfs_avg_vruntime, calculated_avg_vruntime;
 	u64 total_vruntime = 0;
 	u64 nr_tasks = 0;
-
+	bool theorem1_ok = true;
 	struct sched_entity *se;
 	struct rb_node *node;
 	struct rb_root *root;
 
 	cfs_avg_vruntime = avg_vruntime(cfs);
-
-	/*
-	 * Walk through the rb tree -> look at the se->vruntime value and add it
-	 */
-
-	total_vruntime = 0;
-	nr_tasks = 0;
-
 	root = &cfs->tasks_timeline.rb_root;
 
 	for (node = rb_first(root); node; node = rb_next(node)) {
-		s64 vlag, limit;
 		se = __node_2_se(node);
 		WARN_ON_ONCE(__builtin_add_overflow(total_vruntime,
 					se->vruntime, &total_vruntime));
-		/*
-		 * if it is a task group, add to a list to look at later
-		 */
+
 		if (!entity_is_task(se))
 			list_add_tail(&se->tg_entry, tg_se);
 		nr_tasks++;
-		vlag = cfs_avg_vruntime - se->vruntime;
-		limit = calc_delta_fair(max_t(u64, 2*se->slice, TICK_NSEC), se);
-		if ((vlag > 0 && vlag > limit) || (vlag < 0 && vlag < -limit)) 
-			trace_printk("FAIL: lag is exceeding limits\n");
+
+		if (!check_theorem1(se, cfs_avg_vruntime))
+			theorem1_ok = false;
 	}
 
 	if (cfs->curr) {
 		WARN_ON_ONCE(__builtin_add_overflow(total_vruntime,
 					cfs->curr->vruntime, &total_vruntime));
 		nr_tasks++;
+
+		if (!check_theorem1(cfs->curr, cfs_avg_vruntime))
+			theorem1_ok = false;
 	}
 
-	/* If there are no tasks, there is no lag :-) */
 	if (!nr_tasks)
 		return true;
 
 	calculated_avg_vruntime = total_vruntime / nr_tasks;
 
-	return (calculated_avg_vruntime == cfs_avg_vruntime);
+	if (!theorem1_ok) {
+		trace_printk("FAIL: Theorem 1 violated - lag bounds exceeded\n");
+		return false;
+	}
 
+	return (calculated_avg_vruntime == cfs_avg_vruntime);
 }
 
 /*
