@@ -65,6 +65,8 @@ void debugfs_eevdf_testing_init(struct dentry *debugfs_sched)
 	debugfs_create_file("eevdf_zero_lag_test", 0700, debugfs_eevdf_testing,
 				NULL, &eevdf_zero_lag_fops);
 
+	debugfs_create_file("eevdf_lemma3_test", 0700, debugfs_eevdf_testing,
+				NULL, &eevdf_lemma3_fops);
 }
 
 void test_eevdf_positive_lag(struct cfs_rq *cfs, struct sched_entity *se)
@@ -256,5 +258,101 @@ static void launch_test_zero_lag(void)
 
 	wake_up_process(kt);
 }
+
+/*
+ * Lemma 3: The lag of any client is always bounded by the quantum size q.
+ */
+static bool check_lemma3(struct sched_entity *se, u64 avg_vruntime)
+{
+	s64 lag, quantum;
+
+	lag = avg_vruntime - se->vruntime;
+	quantum = se->slice;
+
+	if (lag > quantum || lag < -quantum) {
+		trace_printk("FAIL: Lemma 3 violation - Task %d (%s) lag %lld exceeds quantum %lld\n",
+			     entity_is_task(se) ? task_pid_nr(task_of(se)) : 0,
+			     entity_is_task(se) ? task_of(se)->comm : "task_group",
+			     lag, quantum);
+		trace_printk("  vruntime: %llu, avg_vruntime: %llu, slice: %llu\n",
+			     se->vruntime, avg_vruntime, se->slice);
+		return false;
+	}
+	return true;
+}
+
+static bool test_eevdf_cfs_rq_lemma3(struct cfs_rq *cfs, struct list_head *tg_se)
+{
+	u64 cfs_avg_vruntime;
+	struct sched_entity *se;
+	struct rb_node *node;
+	struct rb_root *root;
+	bool lemma3_ok = true;
+
+	cfs_avg_vruntime = avg_vruntime(cfs);
+	root = &cfs->tasks_timeline.rb_root;
+
+	for (node = rb_first(root); node; node = rb_next(node)) {
+		se = __node_2_se(node);
+		if (!entity_is_task(se))
+			list_add_tail(&se->tg_entry, tg_se);
+
+		if (!check_lemma3(se, cfs_avg_vruntime))
+			lemma3_ok = false;
+	}
+
+	if (cfs->curr) {
+		if (!check_lemma3(cfs->curr, cfs_avg_vruntime))
+			lemma3_ok = false;
+	}
+
+	return lemma3_ok;
+}
+
+static int test_total_lemma3(void *data)
+{
+	int cpu;
+	struct rq *rq;
+	struct cfs_rq *cfs;
+	bool success = true;
+
+	for_each_online_cpu(cpu) {
+		rq = cpu_rq(cpu);
+		guard(rq_lock_irq)(rq);
+		cfs = &rq->cfs;
+		success &= test_eevdf_cfs_rq_lemma3(cfs, NULL);
+	}
+	if (!success) {
+		trace_printk("FAILED: Lemma 3 violated on at least one CPU\n");
+		return -1;
+	}
+	trace_printk("PASS: Lemma 3 holds on all CPUs\n");
+	return 0;
+}
+
+static int eevdf_lemma3_show(struct seq_file *m, void *v)
+{
+	return 0;
+}
+
+static int eevdf_lemma3_open(struct inode *inode, struct file *filp)
+{
+	return single_open(filp, eevdf_lemma3_show, NULL);
+}
+
+static ssize_t eevdf_lemma3_write(struct file *filp, const char __user *ubuf,
+				   size_t cnt, loff_t *ppos)
+{
+	test_total_lemma3(NULL);
+	return 1;
+}
+
+static const struct file_operations eevdf_lemma3_fops = {
+	.open		= eevdf_lemma3_open,
+	.write		= eevdf_lemma3_write,
+	.read		= seq_read,
+	.llseek		= seq_lseek,
+	.release	= single_release,
+};
 
 #endif /* CONFIG_SCHED_EEVDF_TESTING */
