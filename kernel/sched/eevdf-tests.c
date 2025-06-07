@@ -65,6 +65,9 @@ void debugfs_eevdf_testing_init(struct dentry *debugfs_sched)
 	debugfs_create_file("eevdf_zero_lag_test", 0700, debugfs_eevdf_testing,
 				NULL, &eevdf_zero_lag_fops);
 
+	debugfs_create_file("eevdf_theorem1_test", 0700, debugfs_eevdf_testing,
+				NULL, &eevdf_theorem1_fops);
+
 	debugfs_create_file("eevdf_lemma3_test", 0700, debugfs_eevdf_testing,
 				NULL, &eevdf_lemma3_fops);
 
@@ -146,7 +149,6 @@ static bool test_eevdf_cfs_rq_zero_lag(struct cfs_rq *cfs, struct list_head *tg_
 	u64 cfs_avg_vruntime, calculated_avg_vruntime;
 	u64 total_vruntime = 0;
 	u64 nr_tasks = 0;
-	bool theorem1_ok = true;
 	struct sched_entity *se;
 	struct rb_node *node;
 	struct rb_root *root;
@@ -162,18 +164,12 @@ static bool test_eevdf_cfs_rq_zero_lag(struct cfs_rq *cfs, struct list_head *tg_
 		if (!entity_is_task(se))
 			list_add_tail(&se->tg_entry, tg_se);
 		nr_tasks++;
-
-		if (!check_theorem1(se, cfs_avg_vruntime))
-			theorem1_ok = false;
 	}
 
 	if (cfs->curr) {
 		WARN_ON_ONCE(__builtin_add_overflow(total_vruntime,
 					cfs->curr->vruntime, &total_vruntime));
 		nr_tasks++;
-
-		if (!check_theorem1(cfs->curr, cfs_avg_vruntime))
-			theorem1_ok = false;
 	}
 
 	if (!nr_tasks)
@@ -181,98 +177,99 @@ static bool test_eevdf_cfs_rq_zero_lag(struct cfs_rq *cfs, struct list_head *tg_
 
 	calculated_avg_vruntime = total_vruntime / nr_tasks;
 
-	if (!theorem1_ok) {
-		trace_printk("FAIL: Theorem 1 violated - lag bounds exceeded\n");
-		return false;
-	}
-
 	return (calculated_avg_vruntime == cfs_avg_vruntime);
 }
 
-/*
- * Call with rq lock held
- *
- * return false on failure
- */
-static bool test_eevdf_zero_lag(struct cfs_rq *cfs)
+static bool test_eevdf_cfs_rq_theorem1(struct cfs_rq *cfs, struct list_head *tg_se)
 {
-	struct list_head tg_se = LIST_HEAD_INIT(tg_se);;
+	u64 cfs_avg_vruntime;
+	bool theorem1_ok = true;
+	struct sched_entity *se;
+	struct rb_node *node;
+	struct rb_root *root;
+
+	cfs_avg_vruntime = avg_vruntime(cfs);
+	root = &cfs->tasks_timeline.rb_root;
+
+	for (node = rb_first(root); node; node = rb_next(node)) {
+		se = __node_2_se(node);
+		if (!entity_is_task(se))
+			list_add_tail(&se->tg_entry, tg_se);
+
+		if (!check_theorem1(se, cfs_avg_vruntime))
+			theorem1_ok = false;
+	}
+
+	if (cfs->curr) {
+		if (!check_theorem1(cfs->curr, cfs_avg_vruntime))
+			theorem1_ok = false;
+	}
+
+	return theorem1_ok;
+}
+
+static bool test_eevdf_theorem1(struct cfs_rq *cfs)
+{
+	struct list_head tg_se = LIST_HEAD_INIT(tg_se);
 	struct list_head *se_entry;
 
-	/*
-	 * The base CFS runqueue will always have sched entities queued.
-	 * Test it, and start populating the tg_se list.
-	 *
-	 * If it fails, short circuit and return fail.
-	 */
-
-	if (!test_eevdf_cfs_rq_zero_lag(cfs, &tg_se))
+	if (!test_eevdf_cfs_rq_theorem1(cfs, &tg_se))
 		return false;
-
-	/*
-	 * We made it here, let's walk through the list. Since it is
-	 * setup as a queue, as we continue calling the rq test, it
-	 * will add new task_groups to the list. Once drained, if we
-	 * haven't failed, we will return true.
-	 */
 
 	list_for_each(se_entry, &tg_se) {
 		struct sched_entity *se = list_entry(se_entry, struct sched_entity, tg_entry);
-		if (!test_eevdf_cfs_rq_zero_lag(group_cfs_rq(se), &tg_se))
+		if (!test_eevdf_cfs_rq_theorem1(group_cfs_rq(se), &tg_se))
 			return false;
 	}
 
-	/*
-	 * WOOT! We succeeded!
-	 */
 	return true;
-
 }
 
-/*
- * The average vruntime of the entire cfs_rq should be equal
- * to the avg_vruntime(cfs_rq)
- */
-static int test_total_zero_lag(void *data)
+static int test_total_theorem1(void *data)
 {
 	int cpu;
 	struct rq *rq;
 	struct cfs_rq *cfs;
-	bool success = false;
+	bool success = true;
 
 	for_each_online_cpu(cpu) {
-
 		rq = cpu_rq(cpu);
 		guard(rq_lock_irq)(rq);
-
 		cfs = &rq->cfs;
-
-		success = test_eevdf_zero_lag(cfs);
-
-		if (!success)
-			break;
+		success &= test_eevdf_theorem1(cfs);
 	}
 	if (!success) {
-		trace_printk("FAILED: tracked average vruntime doesn't match calculated average vruntime\n");
+		trace_printk("FAILED: Theorem 1 violated - lag bounds exceeded\n");
 		return -1;
 	}
-	trace_printk("PASS: Tracked average runtime matches calculated average vruntime\n");
+	trace_printk("PASS: Theorem 1 holds on all CPUs\n");
 	return 0;
 }
 
-static void launch_test_zero_lag(void)
+static int eevdf_theorem1_show(struct seq_file *m, void *v)
 {
-	struct task_struct *kt;
-
-	kt = kthread_create(&test_total_zero_lag, NULL, "eevdf-tester-%d",
-					smp_processor_id());
-	if (!kt) {
-		trace_printk("Failed to launch kthread\n");
-		return;
-	}
-
-	wake_up_process(kt);
+	return 0;
 }
+
+static int eevdf_theorem1_open(struct inode *inode, struct file *filp)
+{
+	return single_open(filp, eevdf_theorem1_show, NULL);
+}
+
+static ssize_t eevdf_theorem1_write(struct file *filp, const char __user *ubuf,
+				   size_t cnt, loff_t *ppos)
+{
+	test_total_theorem1(NULL);
+	return 1;
+}
+
+static const struct file_operations eevdf_theorem1_fops = {
+	.open		= eevdf_theorem1_open,
+	.write		= eevdf_theorem1_write,
+	.read		= seq_read,
+	.llseek		= seq_lseek,
+	.release	= single_release,
+};
 
 /*
  * Lemma 3: The lag of any client is always bounded by the quantum size q.
