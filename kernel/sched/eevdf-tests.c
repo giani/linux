@@ -132,13 +132,21 @@ static bool check_theorem1(struct sched_entity *se, u64 avg_vruntime)
 	limit = calc_delta_fair(max_t(u64, 2*se->slice, TICK_NSEC), se);
 
 	if ((vlag > 0 && vlag > limit) || (vlag < 0 && vlag < -limit)) {
-		trace_printk("FAIL: Theorem 1 violation - Task %d (%s) lag %lld "
-			    "exceeds limit %lld\n",
+		trace_printk("FAIL: Theorem 1 violation - Task %d (%s) lag exceeds quantum bound\n",
 			    entity_is_task(se) ? task_pid_nr(task_of(se)) : 0,
-			    entity_is_task(se) ? task_of(se)->comm : "task_group",
-			    vlag, limit);
-		trace_printk("  vruntime: %llu, avg_vruntime: %llu, slice: %llu\n",
-			    se->vruntime, avg_vruntime, se->slice);
+			    entity_is_task(se) ? task_of(se)->comm : "task_group");
+		trace_printk("  Task details:\n");
+		trace_printk("    PID: %d\n", entity_is_task(se) ? task_pid_nr(task_of(se)) : 0);
+		trace_printk("    Name: %s\n", entity_is_task(se) ? task_of(se)->comm : "task_group");
+		trace_printk("    Weight: %d\n", se->load.weight);
+		trace_printk("    vruntime: %llu\n", se->vruntime);
+		trace_printk("    avg_vruntime: %llu\n", avg_vruntime);
+		trace_printk("    lag: %lld\n", vlag);
+		trace_printk("    limit: %lld\n", limit);
+		trace_printk("    slice: %llu\n", se->slice);
+		trace_printk("    on_rq: %d\n", se->on_rq);
+		trace_printk("    on_list: %d\n", !RB_EMPTY_NODE(&se->run_node));
+		trace_printk("    is_curr: %d\n", se == se->cfs_rq->curr);
 		return false;
 	}
 	return true;
