@@ -53,6 +53,57 @@ static const struct file_operations eevdf_zero_lag_fops = {
 	.release	= single_release,
 };
 
+static int eevdf_lemma3_show(struct seq_file *m, void *v)
+{
+	return 0;
+}
+
+static int eevdf_lemma3_open(struct inode *inode, struct file *filp)
+{
+	return single_open(filp, eevdf_lemma3_show, NULL);
+}
+
+static int test_total_lemma3(void *data);
+static ssize_t eevdf_lemma3_write(struct file *filp, const char __user *ubuf,
+				   size_t cnt, loff_t *ppos)
+{
+	test_total_lemma3(NULL);
+	return 1;
+}
+
+static const struct file_operations eevdf_lemma3_fops = {
+	.open		= eevdf_lemma3_open,
+	.write		= eevdf_lemma3_write,
+	.read		= seq_read,
+	.llseek		= seq_lseek,
+	.release	= single_release,
+};
+static int eevdf_lemma4_show(struct seq_file *m, void *v)
+{
+	return 0;
+}
+
+static int eevdf_lemma4_open(struct inode *inode, struct file *filp)
+{
+	return single_open(filp, eevdf_lemma4_show, NULL);
+}
+
+static int test_total_lemma4(void *data);
+static ssize_t eevdf_lemma4_write(struct file *filp, const char __user *ubuf,
+				   size_t cnt, loff_t *ppos)
+{
+	test_total_lemma4(NULL);
+	return 1;
+}
+
+static const struct file_operations eevdf_lemma4_fops = {
+	.open		= eevdf_lemma4_open,
+	.write		= eevdf_lemma4_write,
+	.read		= seq_read,
+	.llseek		= seq_lseek,
+	.release	= single_release,
+};
+
 static struct dentry *debugfs_eevdf_testing;
 void debugfs_eevdf_testing_init(struct dentry *debugfs_sched)
 {
@@ -243,7 +294,7 @@ static int test_total_zero_lag(void *data)
 	for_each_online_cpu(cpu) {
 
 		rq = cpu_rq(cpu);
-		guard(rq_lock_irq)(rq);
+		guard(rq_lock_irqsave)(rq);
 
 		cfs = &rq->cfs;
 
@@ -333,9 +384,10 @@ static int test_total_lemma3(void *data)
 
 	for_each_online_cpu(cpu) {
 		rq = cpu_rq(cpu);
-		guard(rq_lock_irq)(rq);
+		guard(rq_lock_irqsave)(rq);
 		cfs = &rq->cfs;
 		success &= test_eevdf_cfs_rq_lemma3(cfs, NULL);
+		if (!success) break;
 	}
 	if (!success) {
 		trace_printk("FAILED: Lemma 3 violated on at least one CPU\n");
@@ -345,30 +397,6 @@ static int test_total_lemma3(void *data)
 	return 0;
 }
 
-static int eevdf_lemma3_show(struct seq_file *m, void *v)
-{
-	return 0;
-}
-
-static int eevdf_lemma3_open(struct inode *inode, struct file *filp)
-{
-	return single_open(filp, eevdf_lemma3_show, NULL);
-}
-
-static ssize_t eevdf_lemma3_write(struct file *filp, const char __user *ubuf,
-				   size_t cnt, loff_t *ppos)
-{
-	test_total_lemma3(NULL);
-	return 1;
-}
-
-static const struct file_operations eevdf_lemma3_fops = {
-	.open		= eevdf_lemma3_open,
-	.write		= eevdf_lemma3_write,
-	.read		= seq_read,
-	.llseek		= seq_lseek,
-	.release	= single_release,
-};
 
 /*
  * Lemma 4: The lag of any client is always non-positive at the time it is selected for service.
@@ -376,21 +404,21 @@ static const struct file_operations eevdf_lemma3_fops = {
 static bool test_lemma4_selected_task(struct cfs_rq *cfs)
 {
 	struct sched_entity *se;
-	u64 avg_vruntime;
+	u64 avgvruntime;
 	s64 lag;
 
 	if (!cfs->curr)
 		return true;
 
 	se = cfs->curr;
-	avg_vruntime = avg_vruntime(cfs);
+	avgvruntime = avg_vruntime(cfs);
 	lag = avg_vruntime - se->vruntime;
 
 	if (lag > 0) {
 		trace_printk("FAIL: Lemma 4 violation - Selected task %d (%s) lag %lld is positive\n",
 			     task_pid_nr(task_of(se)), task_of(se)->comm, lag);
 		trace_printk("  vruntime: %llu, avg_vruntime: %llu\n",
-			     se->vruntime, avg_vruntime);
+			     se->vruntime, avgvruntime);
 		return false;
 	}
 	return true;
@@ -405,7 +433,7 @@ static int test_total_lemma4(void *data)
 
 	for_each_online_cpu(cpu) {
 		rq = cpu_rq(cpu);
-		guard(rq_lock_irq)(rq);
+		guard(rq_lock_irqsave)(rq);
 		cfs = &rq->cfs;
 		success &= test_lemma4_selected_task(cfs);
 	}
@@ -416,30 +444,5 @@ static int test_total_lemma4(void *data)
 	trace_printk("PASS: Lemma 4 holds on all CPUs\n");
 	return 0;
 }
-
-static int eevdf_lemma4_show(struct seq_file *m, void *v)
-{
-	return 0;
-}
-
-static int eevdf_lemma4_open(struct inode *inode, struct file *filp)
-{
-	return single_open(filp, eevdf_lemma4_show, NULL);
-}
-
-static ssize_t eevdf_lemma4_write(struct file *filp, const char __user *ubuf,
-				   size_t cnt, loff_t *ppos)
-{
-	test_total_lemma4(NULL);
-	return 1;
-}
-
-static const struct file_operations eevdf_lemma4_fops = {
-	.open		= eevdf_lemma4_open,
-	.write		= eevdf_lemma4_write,
-	.read		= seq_read,
-	.llseek		= seq_lseek,
-	.release	= single_release,
-};
 
 #endif /* CONFIG_SCHED_EEVDF_TESTING */
