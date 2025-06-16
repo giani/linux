@@ -24,6 +24,9 @@
 bool eevdf_positive_lag_test;
 u8 eevdf_positive_lag_count = 10;
 
+bool eevdf_lag_bounds_test;
+u8 eevdf_lag_bounds_count = 10;
+
 static int test_total_zero_lag(void *);
 static void launch_test_zero_lag(void);
 
@@ -64,6 +67,10 @@ void debugfs_eevdf_testing_init(struct dentry *debugfs_sched)
 				debugfs_eevdf_testing, &eevdf_positive_lag_count);
 	debugfs_create_file("eevdf_zero_lag_test", 0700, debugfs_eevdf_testing,
 				NULL, &eevdf_zero_lag_fops);
+	debugfs_create_bool("eevdf_lag_bounds_test", 0700,
+				debugfs_eevdf_testing, &eevdf_lag_bounds_test);
+	debugfs_create_u8("eevdf_lag_bounds_test_count", 0600,
+				debugfs_eevdf_testing, &eevdf_lag_bounds_count);
 
 }
 
@@ -104,6 +111,47 @@ void test_eevdf_positive_lag(struct cfs_rq *cfs, struct sched_entity *se)
 	}
 }
 
+void test_eevdf_lag_bounds(struct cfs_rq *cfs, struct sched_entity *se)
+{
+	static int eevdf_lag_bounds_test_counter;
+	u64 eevdf_average_vruntime;
+	u64 slice;
+
+	if (!eevdf_lag_bounds_test)
+		return;
+
+	if (!se || !cfs)
+		return;
+
+	eevdf_average_vruntime = avg_vruntime(cfs);
+	eevdf_positive_lag_test_counter++;
+
+	slice = se->slice;
+	if (se->deadline > eevdf_average_vruntime + slice) {
+
+		trace_printk("FAIL: Lemma 3 failed - selected task has negative lag\n");
+		trace_printk("  Task details:\n");
+		trace_printk("    PID			: %d\n", task_pid_nr(task_of(se)));
+		trace_printk("    Name			: %s\n", task_of(se)->comm);
+		trace_printk("    Weight		: %d\n", se->load.weight);
+		trace_printk("    vruntime		: %llu\n", se->vruntime);
+		trace_printk("    deadline		: %llu\n", se->deadline);
+		trace_printk("    slice			: %llu\n", se->slice);
+		trace_printk("    avg_vruntime		: %llu\n", eevdf_average_vruntime);
+		trace_printk("    avg_vruntime + slice	: %llu\n", se->slice + eevdf_average_vruntime);
+		trace_printk("    lag: %lld\n", (s64)(eevdf_average_vruntime - se->vruntime));
+
+		eevdf_lag_bounds_test = 0;
+		eevdf_lag_bounds_test_counter = 0;
+		return;
+	}
+
+	if (eevdf_lag_bounds_test_counter > eevdf_lag_bounds_count) {
+		eevdf_lag_bounds_test = 0;
+		eevdf_lag_bounds_test_counter = 0;
+		trace_printk("PASS: At least %u selected tasks had request complete within bounds\n", eevdf_positive_lag_count);
+	}
+}
 
 u64 calc_delta_fair(u64 delta, struct sched_entity *se);
 
