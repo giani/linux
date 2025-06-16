@@ -127,7 +127,7 @@ static void test_eevdf_lag_bounds(struct cfs_rq *cfs, struct sched_entity *se)
 	eevdf_lag_bounds_test_counter++;
 
 	slice = se->slice;
-	if (se->deadline > eevdf_average_vruntime + slice) {
+	if (se->deadline + slice < eevdf_average_vruntime) {
 
 		trace_printk("FAIL: Lemma 3 failed - selected task has negative lag\n");
 		trace_printk("  Task details:\n");
@@ -138,7 +138,7 @@ static void test_eevdf_lag_bounds(struct cfs_rq *cfs, struct sched_entity *se)
 		trace_printk("    deadline		: %llu\n", se->deadline);
 		trace_printk("    slice			: %llu\n", se->slice);
 		trace_printk("    avg_vruntime		: %llu\n", eevdf_average_vruntime);
-		trace_printk("    avg_vruntime + slice	: %llu\n", se->slice + eevdf_average_vruntime);
+		trace_printk("    avg_vruntime + slice	: %llu\n", se->slice + se->deadline);
 		trace_printk("    lag: %lld\n", (s64)(eevdf_average_vruntime - se->vruntime));
 
 		eevdf_lag_bounds_test = 0;
