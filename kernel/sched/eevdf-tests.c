@@ -74,7 +74,7 @@ void debugfs_eevdf_testing_init(struct dentry *debugfs_sched)
 
 }
 
-void test_eevdf_positive_lag(struct cfs_rq *cfs, struct sched_entity *se)
+static void test_eevdf_positive_lag(struct cfs_rq *cfs, struct sched_entity *se)
 {
 	static int eevdf_positive_lag_test_counter;
 	u64 eevdf_average_vruntime;
@@ -111,7 +111,7 @@ void test_eevdf_positive_lag(struct cfs_rq *cfs, struct sched_entity *se)
 	}
 }
 
-void test_eevdf_lag_bounds(struct cfs_rq *cfs, struct sched_entity *se)
+static void test_eevdf_lag_bounds(struct cfs_rq *cfs, struct sched_entity *se)
 {
 	static int eevdf_lag_bounds_test_counter;
 	u64 eevdf_average_vruntime;
@@ -124,7 +124,7 @@ void test_eevdf_lag_bounds(struct cfs_rq *cfs, struct sched_entity *se)
 		return;
 
 	eevdf_average_vruntime = avg_vruntime(cfs);
-	eevdf_positive_lag_test_counter++;
+	eevdf_lag_bounds_test_counter++;
 
 	slice = se->slice;
 	if (se->deadline > eevdf_average_vruntime + slice) {
@@ -153,6 +153,12 @@ void test_eevdf_lag_bounds(struct cfs_rq *cfs, struct sched_entity *se)
 	}
 }
 
+void eevdf_test_tasks(struct cfs_rq *cfs, struct sched_entity *se)
+{
+	test_eevdf_positive_lag(cfs, se);
+	test_eevdf_lag_bounds(cfs, se);
+}
+
 u64 calc_delta_fair(u64 delta, struct sched_entity *se);
 
 /*
@@ -168,9 +174,6 @@ static bool test_eevdf_cfs_rq_zero_lag(struct cfs_rq *cfs, struct list_head *tg_
 
 	u64 total_vruntime = 0;
 	u64 nr_tasks = 0;
-
-	s64 max_lag = INT64_MIN;
-	s64 min_lag = INT64_MAX;
 
 	struct sched_entity *se;
 	struct rb_node *node;
