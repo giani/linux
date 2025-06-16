@@ -82,7 +82,16 @@ void test_eevdf_positive_lag(struct cfs_rq *cfs, struct sched_entity *se)
 	eevdf_positive_lag_test_counter++;
 
 	if (se->vruntime > eevdf_average_vruntime) {
+
 		trace_printk("FAIL: Lemma 1 failed - selected task has negative lag\n");
+		trace_printk("  Task details:\n");
+		trace_printk("    PID: %d\n", task_pid_nr(task_of(se)));
+		trace_printk("    Name: %s\n", task_of(se)->comm);
+		trace_printk("    Weight: %d\n", se->load.weight);
+		trace_printk("    vruntime: %llu\n", se->vruntime);
+		trace_printk("    avg_vruntime: %llu\n", eevdf_average_vruntime);
+		trace_printk("    lag: %lld\n", (s64)(eevdf_average_vruntime - se->vruntime));
+
 		eevdf_positive_lag_test = 0;
 		eevdf_positive_lag_test_counter = 0;
 		return;
