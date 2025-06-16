@@ -3862,7 +3862,7 @@ void sched_enq_and_set_task(struct sched_enq_and_set_ctx *ctx);
 void debugfs_eevdf_testing_init(struct dentry *debugfs_sched);
 void test_eevdf_positive_lag(struct cfs_rq *cfs, struct sched_entity *se);
 #else /* CONFIG_SCHED_EEVDF_TESTING */
-static inline void init_eevdf_testing_debugfs(struct dentry *debugfs_sched) {}
+static inline void debugfs_eevdf_testing_init(struct dentry *debugfs_sched) {}
 static inline void test_eevdf_positive_lag(struct cfs_rq *cfs, struct sched_entity *se) {}
 #endif /* CONFIG_SCHED_EEVDF_TESTING */
 
