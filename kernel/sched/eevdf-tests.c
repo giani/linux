@@ -142,7 +142,7 @@ void test_eevdf_positive_lag(struct cfs_rq *cfs, struct sched_entity *se)
 		trace_printk("  Task details:\n");
 		trace_printk("    PID: %d\n", task_pid_nr(task_of(se)));
 		trace_printk("    Name: %s\n", task_of(se)->comm);
-		trace_printk("    Weight: %d\n", se->load.weight);
+		trace_printk("    Weight: %ld\n", se->load.weight);
 		trace_printk("    vruntime: %llu\n", se->vruntime);
 		trace_printk("    avg_vruntime: %llu\n", eevdf_average_vruntime);
 		trace_printk("    lag: %lld\n", (s64)(eevdf_average_vruntime - se->vruntime));
@@ -174,19 +174,27 @@ u64 calc_delta_fair(u64 delta, struct sched_entity *se);
 
 static bool check_theorem1(struct sched_entity *se, u64 avg_vruntime)
 {
-	s64 vlag, limit;
+	s64 lag, slice;
 
-	vlag = avg_vruntime - se->vruntime;
-	limit = calc_delta_fair(max_t(u64, 2*se->slice, TICK_NSEC), se);
+	lag = avg_vruntime - se->vruntime;
+	slice = se->slice;
 
-	if ((vlag > 0 && vlag > limit) || (vlag < 0 && vlag < -limit)) {
-		trace_printk("FAIL: Theorem 1 violation - Task %d (%s) lag %lld "
-			    "exceeds limit %lld\n",
+	if (lag <= -slice || lag >= slice) {
+		trace_printk("FAIL: Theorem 1 violation - Task %d (%s) lag exceeds bounds\n",
 			    entity_is_task(se) ? task_pid_nr(task_of(se)) : 0,
-			    entity_is_task(se) ? task_of(se)->comm : "task_group",
-			    vlag, limit);
-		trace_printk("  vruntime: %llu, avg_vruntime: %llu, slice: %llu\n",
-			    se->vruntime, avg_vruntime, se->slice);
+			    entity_is_task(se) ? task_of(se)->comm : "task_group");
+		trace_printk("  Task details:\n");
+		trace_printk("    PID: %d\n", entity_is_task(se) ? task_pid_nr(task_of(se)) : 0);
+		trace_printk("    Name: %s\n", entity_is_task(se) ? task_of(se)->comm : "task_group");
+		trace_printk("    Weight: %ld\n", se->load.weight);
+		trace_printk("    vruntime: %llu\n", se->vruntime);
+		trace_printk("    avg_vruntime: %llu\n", avg_vruntime);
+		trace_printk("    lag: %lld\n", lag);
+		trace_printk("    slice: %llu\n", slice);
+		trace_printk("    bounds: [-%lld, %lld]\n", slice, slice);
+		trace_printk("    on_rq: %d\n", se->on_rq);
+		trace_printk("    on_list: %d\n", !RB_EMPTY_NODE(&se->run_node));
+		trace_printk("    is_curr: %d\n", se == se->cfs_rq->curr);
 		return false;
 	}
 	return true;
@@ -330,18 +338,26 @@ static void launch_test_zero_lag(void)
  */
 static bool check_lemma3(struct sched_entity *se, u64 avg_vruntime)
 {
-	s64 lag, quantum;
+	u64 completion_deadline;
 
-	lag = avg_vruntime - se->vruntime;
-	quantum = se->slice;
+	completion_deadline = se->deadline + se->slice;
 
-	if (lag > quantum || lag < -quantum) {
-		trace_printk("FAIL: Lemma 3 violation - Task %d (%s) lag %lld exceeds quantum %lld\n",
-			     entity_is_task(se) ? task_pid_nr(task_of(se)) : 0,
-			     entity_is_task(se) ? task_of(se)->comm : "task_group",
-			     lag, quantum);
-		trace_printk("  vruntime: %llu, avg_vruntime: %llu, slice: %llu\n",
-			     se->vruntime, avg_vruntime, se->slice);
+	if (avg_vruntime > completion_deadline) {
+		trace_printk("FAIL: Lemma 3 violation - Task %d (%s) request completion overdue\n",
+			    entity_is_task(se) ? task_pid_nr(task_of(se)) : 0,
+			    entity_is_task(se) ? task_of(se)->comm : "task_group");
+		trace_printk("  Task details:\n");
+		trace_printk("    PID: %d\n", entity_is_task(se) ? task_pid_nr(task_of(se)) : 0);
+		trace_printk("    Name: %s\n", entity_is_task(se) ? task_of(se)->comm : "task_group");
+		trace_printk("    Weight: %ld\n", se->load.weight);
+		trace_printk("    vruntime: %llu\n", se->vruntime);
+		trace_printk("    deadline: %llu\n", se->deadline);
+		trace_printk("    slice: %llu\n", se->slice);
+		trace_printk("    completion_deadline: %llu\n", completion_deadline);
+		trace_printk("    current_time: %llu\n", avg_vruntime);
+		trace_printk("    overdue_by: %lld\n", (s64)(avg_vruntime - completion_deadline));
+		trace_printk("    on_rq: %d\n", se->on_rq);
+		trace_printk("    on_list: %d\n", !RB_EMPTY_NODE(&se->run_node));
 		return false;
 	}
 	return true;
@@ -404,21 +420,28 @@ static int test_total_lemma3(void *data)
 static bool test_lemma4_selected_task(struct cfs_rq *cfs)
 {
 	struct sched_entity *se;
-	u64 avgvruntime;
+	u64 cfs_avg_vruntime;
 	s64 lag;
 
 	if (!cfs->curr)
 		return true;
 
 	se = cfs->curr;
-	avgvruntime = avg_vruntime(cfs);
-	lag = avg_vruntime - se->vruntime;
+	cfs_avg_vruntime = avg_vruntime(cfs);
+	lag = cfs_avg_vruntime - se->vruntime;
 
 	if (lag > 0) {
-		trace_printk("FAIL: Lemma 4 violation - Selected task %d (%s) lag %lld is positive\n",
-			     task_pid_nr(task_of(se)), task_of(se)->comm, lag);
-		trace_printk("  vruntime: %llu, avg_vruntime: %llu\n",
-			     se->vruntime, avgvruntime);
+		trace_printk("FAIL: Lemma 4 violation - Selected task has positive lag\n");
+		trace_printk("  Task details:\n");
+		trace_printk("    PID: %d\n", entity_is_task(se) ? task_pid_nr(task_of(se)) : 0);
+		trace_printk("    Name: %s\n", entity_is_task(se) ? task_of(se)->comm : "task_group");
+		trace_printk("    Weight: %ld\n", se->load.weight);
+		trace_printk("    vruntime: %llu\n", se->vruntime);
+		trace_printk("    avg_vruntime: %llu\n", cfs_avg_vruntime);
+		trace_printk("    lag: %lld\n", lag);
+		trace_printk("    slice: %llu\n", se->slice);
+		trace_printk("    on_rq: %d\n", se->on_rq);
+		trace_printk("    on_list: %d\n", !RB_EMPTY_NODE(&se->run_node));
 		return false;
 	}
 	return true;
