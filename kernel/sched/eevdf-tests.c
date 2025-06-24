@@ -27,6 +27,11 @@ u8 eevdf_positive_lag_count = 10;
 bool eevdf_lag_bounds_test;
 u8 eevdf_lag_bounds_count = 10;
 
+enum eevdf_test_ids {
+	EEVDF_ZERO_LAG = 0,
+	EEVDF_BOUNDED_LAG = 1,
+};
+
 static int test_total_zero_lag(void *);
 static void launch_test_zero_lag(void);
 
@@ -55,6 +60,34 @@ static const struct file_operations eevdf_zero_lag_fops = {
 	.llseek		= seq_lseek,
 	.release	= single_release,
 };
+//static int test_total_zero_lag(void *);
+
+
+static void launch_test_bounded_lag(void);
+static int eevdf_bounded_lag_show(struct seq_file *m, void *v)
+{
+	return 0;
+}
+
+static int eevdf_bounded_lag_open(struct inode *inode, struct file *filp)
+{
+	return single_open(filp, eevdf_bounded_lag_show, NULL);
+}
+
+static ssize_t eevdf_bounded_lag_write(struct file *filp, const char __user *ubuf,
+				   size_t cnt, loff_t *ppos)
+{
+	launch_test_bounded_lag();
+	return 1;
+
+}
+static const struct file_operations eevdf_bounded_lag_fops = {
+	.open		= eevdf_bounded_lag_open,
+	.write		= eevdf_bounded_lag_write,
+	.read		= seq_read,
+	.llseek		= seq_lseek,
+	.release	= single_release,
+};
 
 static struct dentry *debugfs_eevdf_testing;
 void debugfs_eevdf_testing_init(struct dentry *debugfs_sched)
@@ -67,6 +100,8 @@ void debugfs_eevdf_testing_init(struct dentry *debugfs_sched)
 				debugfs_eevdf_testing, &eevdf_positive_lag_count);
 	debugfs_create_file("eevdf_zero_lag_test", 0700, debugfs_eevdf_testing,
 				NULL, &eevdf_zero_lag_fops);
+	debugfs_create_file("eevdf_bounded_lag_test", 0700,
+				debugfs_eevdf_testing, NULL, &eevdf_bounded_lag_fops);
 	debugfs_create_bool("eevdf_lag_bounds_test", 0700,
 				debugfs_eevdf_testing, &eevdf_lag_bounds_test);
 	debugfs_create_u8("eevdf_lag_bounds_test_count", 0600,
@@ -167,6 +202,67 @@ u64 calc_delta_fair(u64 delta, struct sched_entity *se);
 #define __node_2_se(node) \
 	rb_entry((node), struct sched_entity, run_node)
 
+static bool test_eevdf_cfs_rq_bounded_lag(struct cfs_rq *cfs, struct list_head *tg_se)
+{
+	struct sched_entity *se;
+	struct rb_node *node;
+	struct rb_root *root;
+
+	u64 cfs_avg_vruntime = avg_vruntime(cfs);
+	root = &cfs->tasks_timeline.rb_root;
+	
+	for (node = rb_first(root); node; node = rb_next(node)) {
+		s64 vlag, limit;
+		se = __node_2_se(node);
+		/*
+		 * if it is a task group, add to a list to look at later
+		 */
+		if (!entity_is_task(se))
+			list_add_tail(&se->tg_entry, tg_se);
+		vlag = cfs_avg_vruntime - se->vruntime;
+		limit = calc_delta_fair(max_t(u64, 2*se->slice, TICK_NSEC), se);
+		if ((vlag > 0 && vlag > limit) || (vlag < 0 && vlag < -limit))  {
+			trace_printk("FAIL: lag is exceeding limits\n");
+			trace_printk("  Task details:\n");
+			trace_printk("    PID			: %u\n", task_pid_nr(task_of(se)));
+			trace_printk("    Name			: %s\n", task_of(se)->comm);
+			trace_printk("    Weight		: %lu\n", se->load.weight);
+			trace_printk("    vruntime		: %llu\n", se->vruntime);
+			trace_printk("    deadline		: %llu\n", se->deadline);
+			trace_printk("    slice			: %llu\n", se->slice);
+			trace_printk("    avg_vruntime		: %llu\n", cfs_avg_vruntime);
+			trace_printk("	  vlag			: %lld\n", vlag);
+			trace_printk("	  limt			: %lld\n", (vlag < 0) ? -limit : limit);
+			return false;
+		}
+	}
+
+	if (cfs->curr) {
+		s64 vlag, limit;
+
+		se = cfs->curr;
+		vlag = cfs_avg_vruntime - se->vruntime;
+		limit = calc_delta_fair(max_t(u64, 2*se->slice, TICK_NSEC), se);
+		if ((vlag > 0 && vlag > limit) || (vlag < 0 && vlag < -limit))  {
+			trace_printk("FAIL: lag is exceeding limits\n");
+			trace_printk("  Task details:\n");
+			trace_printk("    PID			: %u\n", task_pid_nr(task_of(se)));
+			trace_printk("    Name			: %s\n", task_of(se)->comm);
+			trace_printk("    Weight		: %lu\n", se->load.weight);
+			trace_printk("    vruntime		: %llu\n", se->vruntime);
+			trace_printk("    deadline		: %llu\n", se->deadline);
+			trace_printk("    slice			: %llu\n", se->slice);
+			trace_printk("    avg_vruntime		: %llu\n", cfs_avg_vruntime);
+			trace_printk("	  vlag			: %lld\n", vlag);
+			trace_printk("	  limt			: %lld\n", (vlag < 0) ? -limit : limit);
+			return false;
+		}
+	}
+
+
+	return true;;
+}
+
 static bool test_eevdf_cfs_rq_zero_lag(struct cfs_rq *cfs, struct list_head *tg_se)
 {
 	u64 cfs_avg_vruntime;
@@ -191,7 +287,6 @@ static bool test_eevdf_cfs_rq_zero_lag(struct cfs_rq *cfs, struct list_head *tg_
 	root = &cfs->tasks_timeline.rb_root;
 
 	for (node = rb_first(root); node; node = rb_next(node)) {
-		s64 vlag, limit;
 		se = __node_2_se(node);
 		WARN_ON_ONCE(__builtin_add_overflow(total_vruntime,
 					se->vruntime, &total_vruntime));
@@ -201,10 +296,6 @@ static bool test_eevdf_cfs_rq_zero_lag(struct cfs_rq *cfs, struct list_head *tg_
 		if (!entity_is_task(se))
 			list_add_tail(&se->tg_entry, tg_se);
 		nr_tasks++;
-		vlag = cfs_avg_vruntime - se->vruntime;
-		limit = calc_delta_fair(max_t(u64, 2*se->slice, TICK_NSEC), se);
-		if ((vlag > 0 && vlag > limit) || (vlag < 0 && vlag < -limit)) 
-			trace_printk("FAIL: lag is exceeding limits\n");
 	}
 
 	if (cfs->curr) {
@@ -223,15 +314,25 @@ static bool test_eevdf_cfs_rq_zero_lag(struct cfs_rq *cfs, struct list_head *tg_
 
 }
 
+
 /*
  * Call with rq lock held
  *
  * return false on failure
  */
-static bool test_eevdf_zero_lag(struct cfs_rq *cfs)
+static bool test_eevdf_iterate_runqueues(struct cfs_rq *cfs, enum eevdf_test_ids id)
 {
 	struct list_head tg_se = LIST_HEAD_INIT(tg_se);;
 	struct list_head *se_entry;
+	bool (*test_function)(struct cfs_rq *, struct list_head *);
+
+	switch(id) {
+		case EEVDF_ZERO_LAG:
+			test_function = test_eevdf_cfs_rq_zero_lag;
+			break;
+		case EEVDF_BOUNDED_LAG:
+			test_function = test_eevdf_cfs_rq_bounded_lag;
+	}
 
 	/*
 	 * The base CFS runqueue will always have sched entities queued.
@@ -240,7 +341,7 @@ static bool test_eevdf_zero_lag(struct cfs_rq *cfs)
 	 * If it fails, short circuit and return fail.
 	 */
 
-	if (!test_eevdf_cfs_rq_zero_lag(cfs, &tg_se))
+	if (!test_function(cfs, &tg_se))
 		return false;
 
 	/*
@@ -252,7 +353,7 @@ static bool test_eevdf_zero_lag(struct cfs_rq *cfs)
 
 	list_for_each(se_entry, &tg_se) {
 		struct sched_entity *se = list_entry(se_entry, struct sched_entity, tg_entry);
-		if (!test_eevdf_cfs_rq_zero_lag(group_cfs_rq(se), &tg_se))
+		if (!test_function(group_cfs_rq(se), &tg_se))
 			return false;
 	}
 
@@ -263,11 +364,7 @@ static bool test_eevdf_zero_lag(struct cfs_rq *cfs)
 
 }
 
-/*
- * The average vruntime of the entire cfs_rq should be equal
- * to the avg_vruntime(cfs_rq)
- */
-static int test_total_zero_lag(void *data)
+static bool test_iterate_all_cpus(enum eevdf_test_ids id)
 {
 	int cpu;
 	struct rq *rq;
@@ -281,11 +378,48 @@ static int test_total_zero_lag(void *data)
 
 		cfs = &rq->cfs;
 
-		success = test_eevdf_zero_lag(cfs);
+		success = test_eevdf_iterate_runqueues(cfs, id);
 
 		if (!success)
 			break;
 	}
+	return success;
+}
+
+static int test_cfs_rq_bounded_lag(void *data)
+{
+	bool success = test_iterate_all_cpus(EEVDF_BOUNDED_LAG);
+
+	if (!success) {
+		trace_printk("FAILED: Task lag is outside of expected bounds\n");
+		return -1;
+	}
+	trace_printk("PASS: All tasks' lag is within expected bounds\n");
+	return 0;
+}
+
+static void launch_test_bounded_lag()
+{
+	struct task_struct *kt;
+
+	kt = kthread_create(&test_cfs_rq_bounded_lag, NULL, "eevdf-tester-%d",
+					smp_processor_id());
+
+	if (!kt) {
+		trace_printk("Failed to launch kthread\n");
+		return;
+	}
+
+	wake_up_process(kt);
+}
+
+/*
+ * The average vruntime of the entire cfs_rq should be equal
+ * to the avg_vruntime(cfs_rq)
+ */
+static int test_total_zero_lag(void *data)
+{
+	bool success = test_iterate_all_cpus(EEVDF_ZERO_LAG);
 	if (!success) {
 		trace_printk("FAILED: tracked average vruntime doesn't match calculated average vruntime\n");
 		return -1;
@@ -294,7 +428,7 @@ static int test_total_zero_lag(void *data)
 	return 0;
 }
 
-static void launch_test_zero_lag(void)
+static void launch_test_zero_lag()
 {
 	struct task_struct *kt;
 
